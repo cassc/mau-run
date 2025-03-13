@@ -14,13 +14,9 @@ type CUdeviceptr = u64; // typedef in your script
 // These structures are not used directly here, but you may need them if your
 // real code depends on them in more detail.
 
-const TEST_NAME: &str = "bug";
-
 fn main() {
     // Adjust the path to your .so as needed
     let lib_path = "./resources/librunner.so";
-    // Adjust your kernel file path if necessary
-    let kernel_path = format!("./resources/{TEST_NAME}.ptx");
 
     // --- 1) Load the shared library dynamically ---
     let lib = unsafe {
@@ -108,119 +104,145 @@ fn main() {
     let mut cu_module: CUmodule = std::ptr::null_mut();
     let gpu_id: c_int = 0;
 
-    // Convert kernel_path to a C string
-    let kernel_cstring = match CString::new(kernel_path) {
-        Ok(s) => s,
-        Err(e) => {
-            eprintln!("Failed to build CString from kernel path: {}", e);
-            return;
+    let tests = vec![
+        ("erc20.ptx", "erc20.hex", "erc20.tx.hex"),
+        ("bug.ptx", "bug.hex", "bug.tx.hex"),
+        ("bug.ptx", "bug.hex", "nobug.tx.hex"),
+    ];
+
+    // run tests
+    for (kernel_file, deploy_file, tx_file) in tests.into_iter() {
+        // Adjust your kernel file path if necessary
+        let kernel_path = format!("./resources/{kernel_file}");
+
+        // Convert kernel_path to a C string
+        let kernel_cstring = match CString::new(kernel_path) {
+            Ok(s) => s,
+            Err(e) => {
+                eprintln!("Failed to build CString from kernel path: {}", e);
+                return;
+            }
+        };
+
+        // --- 5) Call InitCudaCtx(...) ---
+        unsafe {
+            init_cuda_ctx(&mut cu_ctx, gpu_id, &mut cu_module, kernel_cstring.as_ptr());
         }
-    };
+        println!("CUDA context and module initialized.");
 
-    // --- 5) Call InitCudaCtx(...) ---
-    unsafe {
-        init_cuda_ctx(&mut cu_ctx, gpu_id, &mut cu_module, kernel_cstring.as_ptr());
-    }
-    println!("CUDA context and module initialized.");
-
-    // --- 6) Allocate GPU memory with cuMallocAll ---
-    let mut d_seeds: CUdeviceptr = 0;
-    let mut d_signals: CUdeviceptr = 0;
-    unsafe {
-        cu_malloc_all(cu_module, &mut d_seeds, &mut d_signals);
-    }
-    println!(
-        "GPU memory allocated (d_seeds={:#x}, d_signals={:#x}).",
-        d_seeds, d_signals
-    );
-
-    // --- 7) setEVMEnv ---
-    let sender_address = hex::decode("acbf3a12181192fcebef19e27292c98eff62cc76").unwrap();
-    let timestamp: c_ulonglong = 123456789;
-    let blocknum: c_ulonglong = 1;
-    let env_ok = unsafe { set_evm_env(cu_module, sender_address.as_ptr(), timestamp, blocknum) };
-    println!("setEVMEnv() returned: {}", env_ok);
-
-    // --- 8) cuDeployTx ---
-    // Read the deployment data (0x...) from a file
-    let tx_data_deploy = std::fs::read(format!("./resources/{TEST_NAME}.hex")).unwrap();
-
-    // and decode as bytes
-    let tx_data_deploy = match hex::decode(tx_data_deploy) {
-        Ok(b) => b,
-        Err(e) => {
-            eprintln!("Failed to decode hex: {}", e);
-            return;
+        // --- 6) Allocate GPU memory with cuMallocAll ---
+        let mut d_seeds: CUdeviceptr = 0;
+        let mut d_signals: CUdeviceptr = 0;
+        unsafe {
+            cu_malloc_all(cu_module, &mut d_seeds, &mut d_signals);
         }
-    };
+        println!(
+            "GPU memory allocated (d_seeds={:#x}, d_signals={:#x}).",
+            d_seeds, d_signals
+        );
 
-    let tx_value: c_ulonglong = 100;
-    let tx_size = tx_data_deploy.len() as c_uint;
-    let deploy_ok = unsafe { cu_deploy_tx(cu_module, tx_value, tx_data_deploy.as_ptr(), tx_size) };
-    println!("cuDeployTx() returned: {}", deploy_ok);
+        // --- 7) setEVMEnv ---
+        let sender_address = hex::decode("acbf3a12181192fcebef19e27292c98eff62cc76").unwrap();
+        let timestamp: c_ulonglong = 123456789;
+        let blocknum: c_ulonglong = 1;
+        let env_ok =
+            unsafe { set_evm_env(cu_module, sender_address.as_ptr(), timestamp, blocknum) };
+        println!("setEVMEnv() returned: {}", env_ok);
 
-    // --- 9) Copy transaction data to GPU with cuDataCpy ---
-    // Python snippet used a hex string:
-    let tx_bytes = hex::decode(
-        std::fs::read(format!("./resources/{TEST_NAME}.tx.hex")).expect("Read tx data failed"),
-    )
-    .expect("Decode tx data as hex failed");
-    let tx_size2 = tx_bytes.len() as c_uint;
-    // Let's define tx_value again as 0 for the copy
-    let tx_value2: c_ulonglong = 0;
+        // --- 8) cuDeployTx ---
+        // Read the deployment data (0x...) from a file
+        let tx_data_deploy = std::fs::read(format!("./resources/{deploy_file}")).unwrap();
 
-    let copy_ok = unsafe { cu_data_cpy(d_seeds, tx_value2, tx_bytes.as_ptr(), tx_size2) };
-    println!("cuDataCpy() returned: {}", copy_ok);
+        // and decode as bytes
+        let tx_data_deploy = hex::decode(tx_data_deploy).expect("Decode tx data as hex failed");
 
-    // --- 10) Run transaction with cuRunTxs ---
-    let arg_type_map = [0x68_u8; 1];
-    let executions: c_ulonglong = unsafe {
-        cu_run_txs(
-            cu_module,
-            d_seeds,
-            arg_type_map.as_ptr(),
-            arg_type_map.len() as c_int,
+        let tx_value: c_ulonglong = 100;
+        let tx_size = tx_data_deploy.len() as c_uint;
+        let deploy_ok =
+            unsafe { cu_deploy_tx(cu_module, tx_value, tx_data_deploy.as_ptr(), tx_size) };
+        println!("cuDeployTx() returned: {}", deploy_ok);
+
+        // --- 9) Copy transaction data to GPU with cuDataCpy ---
+        // Python snippet used a hex string:
+        let tx_bytes = hex::decode(
+            std::fs::read(format!("./resources/{tx_file}")).expect("Read tx data failed"),
         )
-    };
-    println!("cuRunTxs() num transactions = {}", executions);
+        .expect("Decode tx data as hex failed");
+        let tx_size2 = tx_bytes.len() as c_uint;
+        // Let's define tx_value again as 0 for the copy
+        let tx_value2: c_ulonglong = 0;
 
-    // --- 11) postGainCov ---
-    let cov_ok = unsafe { post_gain_cov(cu_module) };
-    println!("postGainCov() returned: {}", cov_ok);
+        let copy_ok = unsafe { cu_data_cpy(d_seeds, tx_value2, tx_bytes.as_ptr(), tx_size2) };
+        println!("cuDataCpy() returned: {}", copy_ok);
 
-    let msg = CString::new("RUST-MAU-RUN: ").unwrap();
-    let du_gained = unsafe { post_gain_du(d_signals, msg.as_ptr()) };
-    println!("postGainDu() returned = {}", du_gained);
+        // --- 10) Run transaction with cuRunTxs ---
+        let arg_type_map = [0x68_u8; 1];
 
-    let mut host_buf = vec![0u8; 128];
+        let mut total_executions = 0;
+        let start = std::time::Instant::now();
+        for _ in 0..100 {
+            let executions: c_ulonglong = unsafe {
+                cu_run_txs(
+                    cu_module,
+                    d_seeds,
+                    arg_type_map.as_ptr(),
+                    arg_type_map.len() as c_int,
+                )
+            };
 
-    let res = unsafe {
-        cu_memcpy_dtoh(
-            host_buf.as_mut_ptr() as *mut c_void,
-            d_seeds,
-            host_buf.len(),
-        )
-    };
+            if executions == 0 {
+                eprintln!("cuRunTxs() returned 0 executions. Exiting.");
+                break;
+            }
 
-    if res != 0 {
-        eprintln!("cuMemcpyDtoH_v2 returned error code {}", res);
-    } else {
-        println!("Copied data from GPU: {}", hex::encode(&host_buf[..]));
+            total_executions += executions;
+        }
+
+        let elapsed = start.elapsed();
+        println!("cuRunTxs() num transactions = {}", total_executions);
+
+        // Print average time
+        let avg_time = elapsed.as_micros() as f64 / total_executions as f64 / 1000.0;
+        println!(
+            "Executed {} {} {} transactions. Speed: {:.6} ms/transaction.",
+            deploy_file, tx_file, total_executions, avg_time
+        );
+
+        // --- 11) postGainCov ---
+        let cov_ok = unsafe { post_gain_cov(cu_module) };
+        println!("postGainCov() returned: {}", cov_ok);
+
+        let msg = CString::new("RUST-MAU-RUN: ").unwrap();
+        let du_gained = unsafe { post_gain_du(d_signals, msg.as_ptr()) };
+        println!("postGainDu() returned = {}", du_gained);
+
+        let mut host_buf = vec![0u8; 128];
+
+        let res = unsafe {
+            cu_memcpy_dtoh(
+                host_buf.as_mut_ptr() as *mut c_void,
+                d_seeds,
+                host_buf.len(),
+            )
+        };
+
+        if res != 0 {
+            eprintln!("cuMemcpyDtoH_v2 returned error code {}", res);
+        } else {
+            println!("Copied data from GPU: {}", hex::encode(&host_buf[..]));
+        }
+
+        unsafe {
+            vec![0, 10, 233, 255].into_iter().for_each(|i| {
+                println!("Storage dump in thread {}", i);
+                cu_dump_storage(cu_module, i);
+            });
+        }
+        // --- 12) Cleanup: free GPU memory and destroy context ---
+        unsafe {
+            cu_free_all(cu_module, d_seeds);
+            destroy_cuda(cu_ctx, cu_module);
+        }
+        println!("Cleaned up CUDA context and memory. Exiting.");
     }
-
-    unsafe {
-        println!("Storage dump in thread 0");
-        cu_dump_storage(cu_module, 0);
-        println!("Storage dump in thread 1");
-        cu_dump_storage(cu_module, 1);
-        println!("Storage dump in thread 32");
-        cu_dump_storage(cu_module, 32);
-    }
-
-    // --- 12) Cleanup: free GPU memory and destroy context ---
-    unsafe {
-        cu_free_all(cu_module, d_seeds);
-        destroy_cuda(cu_ctx, cu_module);
-    }
-    println!("Cleaned up CUDA context and memory. Exiting.");
 }
