@@ -31,66 +31,19 @@ llc-16 -mcpu=sm_86 bug-kernel.bc -o bug.ptx
 
 
 
-Test execution:
+Test result on RTX 3060:
 
 ``` bash
-
 cargo run
 
-# Running `bug.hex` with the `nobug.tx.hex` transaction:
-
+Loaded shared library: ./resources/librunner.so
+CUDA context and module initialized.
+GPU memory allocated (d_seeds=0x70dcdaa00000, d_signals=0x70dcda80a600).
+setEVMEnv() returned: true
+cuDeployTx() returned: true
+cuDataCpy() returned: true
+cuRunTxs() num transactions = 25600
+Executed usdt.hex usdt.tx.hex 25600 transactions. Speed: 0.005567 ms/transaction.
 ...
-     Running `target/debug/mau-run`
-Loaded shared library: ./resources/librunner.so
-CUDA context and module initialized.
-GPU memory allocated (d_seeds=0x731c3aa00000, d_signals=0x731c3a80a600).
-setEVMEnv() returned: true
-cuDeployTx() returned: true
-cuDataCpy() returned: true
-cuRunTxs() num transactions = 256
-postGainCov() returned: true
-postGainDu() returned = false
-Copied data from GPU: 00000000000000004400000046892d6300000000000000000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000002000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-Storage dump in thread 0
------- Slots#1  ------
-Key:0000000000000000000000000000000000000000000000000000000000000000
-Val:0300000000000000000000000000000000000000000000000000000000000000
-Storage dump in thread 1
------- Slots#1  ------
-Key:0000000000000000000000000000000000000000000000000000000000000000
-Val:0300000000000000000000000000000000000000000000000000000000000040
-Storage dump in thread 32
------- Slots#1  ------
-Key:0000000000000000000000000000000000000000000000000000000000000000
-Val:0300000000000000000000000000000000000000000000000000000000000080
-Cleaned up CUDA context and memory. Exiting.
-
-
-# Running `bug.hex` with the `bug.tx.hex` transaction:
-     Running `target/debug/mau-run`
-Loaded shared library: ./resources/librunner.so
-CUDA context and module initialized.
-GPU memory allocated (d_seeds=0x7c49e6a00000, d_signals=0x7c49e680a600).
-setEVMEnv() returned: true
-cuDeployTx() returned: true
-cuDataCpy() returned: true
-cuRunTxs() num transactions = 256
-postGainCov() returned: true
-[+] RUST-MAU-RUN: Thread#0 found IntegerBug at 30e
-
-postGainDu() returned = true
-Copied data from GPU: 000000000000000044000000b01152e200000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
-Storage dump in thread 0
------- Slots#1  ------
-Key:0000000000000000000000000000000000000000000000000000000000000000
-Val:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff
-Storage dump in thread 1
------- Slots#1  ------
-Key:0000000000000000000000000000000000000000000000000000000000000000
-Val:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff3f
-Storage dump in thread 32
------- Slots#1  ------
-Key:0000000000000000000000000000000000000000000000000000000000000000
-Val:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f
-Cleaned up CUDA context and memory. Exiting.
+...
 ```

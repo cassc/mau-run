@@ -105,7 +105,7 @@ fn main() {
     let gpu_id: c_int = 0;
 
     let tests = vec![
-        ("erc20.ptx", "erc20.hex", "erc20.tx.hex"),
+        ("usdt.ptx", "usdt.hex", "usdt.tx.hex"),
         ("bug.ptx", "bug.hex", "bug.tx.hex"),
         ("bug.ptx", "bug.hex", "nobug.tx.hex"),
     ];
