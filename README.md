@@ -19,6 +19,7 @@ resources/
 
 (Optional) Create the ptx file in [MAU docker](https://github.com/mao-artifact/mao-artifact):
 
+
 ``` bash
 # inside the docker
 ~/tools/mau/standalone-ptxsema bug.hex -o bug.ll --hex --fsanitize=intsan --dump
@@ -35,7 +36,7 @@ Test result on RTX 3060:
 
 ``` bash
 # Execute in docker if you have issues running on the host directly due to the nvidia driver version or the glibc version
-# docker run  --gpus all -it -v $(pwd):/app  -w /app augustus/mau-artifact:latest /bin/bash
+# docker run  --gpus all -it -v $(pwd):/app  -w /app augustus/mau-ityfuzz:latest /bin/bash
 
 cargo run
 
