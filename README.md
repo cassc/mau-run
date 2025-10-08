@@ -34,6 +34,9 @@ llc-16 -mcpu=sm_86 bug-kernel.bc -o bug.ptx
 Test result on RTX 3060:
 
 ``` bash
+# Execute in docker if you have issues running on the host directly due to the nvidia driver version or the glibc version
+# docker run  --gpus all -it -v $(pwd):/app  -w /app augustus/mau-artifact:latest /bin/bash
+
 cargo run
 
 Loaded shared library: ./resources/librunner.so
