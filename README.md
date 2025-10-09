@@ -51,3 +51,11 @@ Executed usdt.hex usdt.tx.hex 25600 transactions. Speed: 0.005567 ms/transaction
 ...
 ...
 ```
+
+
+# Run statetest
+
+
+```bash
+cargo run --bin state_test ./resources/expPower2.json
+```

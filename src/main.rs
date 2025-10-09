@@ -23,7 +23,6 @@ type CuRunTxsFn = unsafe extern "C" fn(*const c_uchar, c_uint) -> c_ulonglong;
 type GetCudaExecResFn = unsafe extern "C" fn(*mut c_ulonglong, *mut c_ulonglong) -> bool;
 type CuDumpStorageFn = unsafe extern "C" fn(c_uint);
 type CuVersionFn = unsafe extern "C" fn() -> c_uint;
-
 fn load_symbol<'lib, F>(lib: &'lib Library, name: &[u8]) -> Symbol<'lib, F> {
     unsafe {
         lib.get(name)
@@ -188,5 +187,5 @@ fn main() {
         }
         println!("Cleaned up CUDA context for {}", kernel_file);
     }
-}
 
+}
