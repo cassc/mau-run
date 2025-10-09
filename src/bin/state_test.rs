@@ -13,14 +13,13 @@ use std::{
     time::Instant,
 };
 
-const GPU_THREADS_FALLBACK: usize = 64 * 16;
+const GPU_THREADS_FALLBACK: usize = 32;
 
 type InitCudaCtxFn = unsafe extern "C" fn(c_int, *const c_char);
 type DestroyCudaFn = unsafe extern "C" fn();
 type CuMallocAllFn = unsafe extern "C" fn();
 type CuFreeAllFn = unsafe extern "C" fn();
-type SetEvmEnvFn =
-    unsafe extern "C" fn(*const c_uchar, *const c_uchar, *const c_uchar) -> bool;
+type SetEvmEnvFn = unsafe extern "C" fn(*const c_uchar, *const c_uchar, *const c_uchar) -> bool;
 type CuDeployTxFn = unsafe extern "C" fn(c_ulonglong, *const c_uchar, c_uint) -> bool;
 type CuRunTxsFn = unsafe extern "C" fn(*const c_uchar, c_uint) -> c_ulonglong;
 type GetCudaExecResFn = unsafe extern "C" fn(*mut c_ulonglong, *mut c_ulonglong) -> bool;
@@ -29,14 +28,8 @@ type CuAddCallerPoolFn = unsafe extern "C" fn(*const c_uchar, c_uint);
 type CuAddAddressPoolFn = unsafe extern "C" fn(*const c_uchar, c_uint);
 type CuLoadStorageFn = unsafe extern "C" fn(*const c_uchar, c_uint, c_uint);
 type CuSetStorageMapFn = unsafe extern "C" fn(c_uint, c_uint);
-type CuLoadSeedFn = unsafe extern "C" fn(
-    *const c_uchar,
-    *const c_uchar,
-    *const c_uchar,
-    c_uint,
-    c_uint,
-    c_uint,
-);
+type CuLoadSeedFn =
+    unsafe extern "C" fn(*const c_uchar, *const c_uchar, *const c_uchar, c_uint, c_uint, c_uint);
 type CuGetThreadsFn = unsafe extern "C" fn() -> c_uint;
 
 fn load_symbol<'lib, F>(lib: &'lib Library, name: &[u8]) -> Symbol<'lib, F> {
@@ -115,8 +108,8 @@ fn load_bytes_from_hex_file(path: &str) -> Option<Vec<u8>> {
     if !Path::new(path).exists() {
         return None;
     }
-    let contents = fs::read_to_string(path)
-        .unwrap_or_else(|err| panic!("Failed to read {}: {}", path, err));
+    let contents =
+        fs::read_to_string(path).unwrap_or_else(|err| panic!("Failed to read {}: {}", path, err));
     let cleaned = contents.trim();
     Some(
         hex::decode(cleaned.trim_start_matches("0x"))
@@ -125,10 +118,10 @@ fn load_bytes_from_hex_file(path: &str) -> Option<Vec<u8>> {
 }
 
 fn parse_state_test(json_path: &str) -> (String, Value) {
-    let json_text =
-        fs::read_to_string(json_path).unwrap_or_else(|err| panic!("Failed to read {}: {}", json_path, err));
-    let document: Value =
-        serde_json::from_str(&json_text).unwrap_or_else(|err| panic!("Failed to parse {}: {}", json_path, err));
+    let json_text = fs::read_to_string(json_path)
+        .unwrap_or_else(|err| panic!("Failed to read {}: {}", json_path, err));
+    let document: Value = serde_json::from_str(&json_text)
+        .unwrap_or_else(|err| panic!("Failed to parse {}: {}", json_path, err));
     let test_object = document
         .as_object()
         .and_then(|obj| obj.iter().next())
@@ -179,17 +172,12 @@ fn main() {
     let set_evm_env: Symbol<SetEvmEnvFn> = load_symbol(&lib, b"setEVMEnv\0");
     let cu_deploy_tx: Symbol<CuDeployTxFn> = load_symbol(&lib, b"cuDeployTx\0");
     let cu_run_txs: Symbol<CuRunTxsFn> = load_symbol(&lib, b"cuRunTxs\0");
-    let get_cuda_exec_res: Symbol<GetCudaExecResFn> =
-        load_symbol(&lib, b"getCudaExecRes\0");
+    let get_cuda_exec_res: Symbol<GetCudaExecResFn> = load_symbol(&lib, b"getCudaExecRes\0");
     let cu_dump_storage: Symbol<CuDumpStorageFn> = load_symbol(&lib, b"cuDumpStorage\0");
-    let cu_add_caller_pool: Symbol<CuAddCallerPoolFn> =
-        load_symbol(&lib, b"cuAddCallerPool\0");
-    let cu_add_address_pool: Symbol<CuAddAddressPoolFn> =
-        load_symbol(&lib, b"cuAddAddressPool\0");
-    let cu_load_storage: Symbol<CuLoadStorageFn> =
-        load_symbol(&lib, b"cuLoadStorage\0");
-    let cu_set_storage_map: Symbol<CuSetStorageMapFn> =
-        load_symbol(&lib, b"cuSetStorageMap\0");
+    let cu_add_caller_pool: Symbol<CuAddCallerPoolFn> = load_symbol(&lib, b"cuAddCallerPool\0");
+    let cu_add_address_pool: Symbol<CuAddAddressPoolFn> = load_symbol(&lib, b"cuAddAddressPool\0");
+    let cu_load_storage: Symbol<CuLoadStorageFn> = load_symbol(&lib, b"cuLoadStorage\0");
+    let cu_set_storage_map: Symbol<CuSetStorageMapFn> = load_symbol(&lib, b"cuSetStorageMap\0");
     let cu_load_seed: Symbol<CuLoadSeedFn> = load_symbol(&lib, b"cuLoadSeed\0");
 
     let gpu_threads = unsafe {
@@ -272,9 +260,9 @@ fn main() {
                 storage_obj
                     .iter()
                     .map(|(slot_key, slot_val)| {
-                        let value_str = slot_val
-                            .as_str()
-                            .unwrap_or_else(|| panic!("Storage value for {} missing string", slot_key));
+                        let value_str = slot_val.as_str().unwrap_or_else(|| {
+                            panic!("Storage value for {} missing string", slot_key)
+                        });
                         make_slot(slot_key, value_str)
                     })
                     .collect::<Vec<_>>()
@@ -286,6 +274,12 @@ fn main() {
             address: address_bytes,
             storage_slots,
         });
+        println!(
+            "Prepared account {} (state_id {}) with {} storage slots",
+            addr,
+            index,
+            accounts.last().unwrap().storage_slots.len()
+        );
     }
 
     let target_norm = normalize_hex_id(contract_to);
@@ -295,7 +289,8 @@ fn main() {
         .map(|acct| acct.state_id)
         .unwrap_or(0);
 
-    let kernel_cstring = CString::new(kernel_path).expect("Failed to convert kernel path to CString");
+    let kernel_cstring =
+        CString::new(kernel_path).expect("Failed to convert kernel path to CString");
 
     unsafe {
         init_cuda_ctx(0, kernel_cstring.as_ptr());
@@ -346,13 +341,8 @@ fn main() {
     }
 
     if let Some(deploy_bytes) = load_bytes_from_hex_file(deploy_hex_path) {
-        let deploy_ok = unsafe {
-            cu_deploy_tx(
-                0,
-                deploy_bytes.as_ptr(),
-                deploy_bytes.len() as c_uint,
-            )
-        };
+        let deploy_ok =
+            unsafe { cu_deploy_tx(0, deploy_bytes.as_ptr(), deploy_bytes.len() as c_uint) };
         println!("cuDeployTx() returned: {}", deploy_ok);
     } else {
         println!(
@@ -361,11 +351,18 @@ fn main() {
         );
     }
 
+    let contract_account_hex = accounts
+        .iter()
+        .find(|acct| acct.state_id == contract_state_id)
+        .map(|acct| hex::encode(acct.address))
+        .unwrap_or_else(|| "unknown".to_string());
+
     let data_ptr = if calldata_bytes.is_empty() {
         ptr::null()
     } else {
         calldata_bytes.as_ptr()
     };
+
     for thread_id in 0..gpu_threads {
         unsafe {
             cu_load_seed(
@@ -381,8 +378,7 @@ fn main() {
 
     let start = Instant::now();
     let arg_type_map = [0x68_u8; 1];
-    let executed =
-        unsafe { cu_run_txs(arg_type_map.as_ptr(), arg_type_map.len() as c_uint) };
+    let executed = unsafe { cu_run_txs(arg_type_map.as_ptr(), arg_type_map.len() as c_uint) };
     if executed == 0 {
         eprintln!("cuRunTxs() returned 0 for state test '{}'", test_name);
     } else {
@@ -410,5 +406,8 @@ fn main() {
         cu_free_all();
         destroy_cuda();
     }
-    println!("State test '{}' finished and context cleaned up.", test_name);
+    println!(
+        "State test '{}' finished and context cleaned up.",
+        test_name
+    );
 }
