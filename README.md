@@ -53,7 +53,7 @@ Executed usdt.hex usdt.tx.hex 25600 transactions. Speed: 0.005567 ms/transaction
 ```
 
 
-# Run statetest
+# Run ethtest
 
 
 ```bash
@@ -65,7 +65,6 @@ python3 json-to-hex.py resources/sdiv.json
 export MAU_TRACE_PC=1
 python3 hex-to-ptx.py resources/sdiv.hex --cleanup
 
-
-# run in docker
+# run the state test in the augustus/mau-ityfuzz:latest docker container
 cargo run --bin state_test ./resources/sdiv.json
 ```
