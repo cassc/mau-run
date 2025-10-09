@@ -38,7 +38,7 @@ Test result on RTX 3060:
 # Execute in docker if you have issues running on the host directly due to the nvidia driver version or the glibc version
 # docker run  --gpus all -it -v $(pwd):/app  -w /app augustus/mau-ityfuzz:latest /bin/bash
 
-cargo run
+cargo run --bin mau-run
 
 Loaded shared library: ./resources/librunner.so
 CUDA context and module initialized.
@@ -57,5 +57,15 @@ Executed usdt.hex usdt.tx.hex 25600 transactions. Speed: 0.005567 ms/transaction
 
 
 ```bash
-cargo run --bin state_test ./resources/expPower2.json
+# run in project root folder:
+# generate deployment hex file required by ptxsema
+python3 json-to-hex.py resources/sdiv.json
+
+# generate PTX from the deployment hex
+export MAU_TRACE_PC=1
+python3 hex-to-ptx.py resources/sdiv.hex --cleanup
+
+
+# run in docker
+cargo run --bin state_test ./resources/sdiv.json
 ```

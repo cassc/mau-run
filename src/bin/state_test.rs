@@ -1,5 +1,6 @@
 #![allow(non_camel_case_types)]
 
+use core::panic;
 use libloading::{Library, Symbol};
 use serde_json::Value;
 use std::{
@@ -13,7 +14,7 @@ use std::{
     time::Instant,
 };
 
-const GPU_THREADS_FALLBACK: usize = 32;
+const GPU_THREADS_FALLBACK: usize = 1;
 
 type InitCudaCtxFn = unsafe extern "C" fn(c_int, *const c_char);
 type DestroyCudaFn = unsafe extern "C" fn();
@@ -131,18 +132,30 @@ fn parse_state_test(json_path: &str) -> (String, Value) {
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let json_path = args
-        .get(1)
-        .map(String::as_str)
-        .unwrap_or("/app/resources/expPower2.json");
+    let json_path = args.get(1).map(String::as_str).unwrap_or_else(|| {
+        panic!(
+            "Usage: {} <state_test.json> [kernel.ptx] [deploy.hex]",
+            args[0]
+        )
+    });
+
+    let default_kernel_path = Path::new(json_path)
+        .with_extension("ptx")
+        .to_string_lossy()
+        .into_owned();
     let kernel_path = args
         .get(2)
         .map(String::as_str)
-        .unwrap_or("./resources/expPower2.ptx");
+        .unwrap_or(&default_kernel_path);
+
+    let default_deploy_path = Path::new(json_path)
+        .with_extension("hex")
+        .to_string_lossy()
+        .into_owned();
     let deploy_hex_path = args
         .get(3)
         .map(String::as_str)
-        .unwrap_or("./resources/expPower2.hex");
+        .unwrap_or(&default_deploy_path);
 
     if !Path::new(json_path).exists() {
         eprintln!("JSON file {} not found; aborting.", json_path);
@@ -274,12 +287,6 @@ fn main() {
             address: address_bytes,
             storage_slots,
         });
-        println!(
-            "Prepared account {} (state_id {}) with {} storage slots",
-            addr,
-            index,
-            accounts.last().unwrap().storage_slots.len()
-        );
     }
 
     let target_norm = normalize_hex_id(contract_to);
