@@ -19,6 +19,7 @@ resources/
 
 (Optional) Create the ptx file in [MAU docker](https://github.com/mao-artifact/mao-artifact):
 
+
 ``` bash
 # inside the docker
 ~/tools/mau/standalone-ptxsema bug.hex -o bug.ll --hex --fsanitize=intsan --dump
@@ -35,9 +36,9 @@ Test result on RTX 3060:
 
 ``` bash
 # Execute in docker if you have issues running on the host directly due to the nvidia driver version or the glibc version
-# docker run  --gpus all -it -v $(pwd):/app  -w /app augustus/mau-artifact:latest /bin/bash
+# docker run  --gpus all -it -v $(pwd):/app  -w /app augustus/mau-ityfuzz:latest /bin/bash
 
-cargo run
+cargo run --bin mau-run
 
 Loaded shared library: ./resources/librunner.so
 CUDA context and module initialized.
@@ -49,4 +50,21 @@ cuRunTxs() num transactions = 25600
 Executed usdt.hex usdt.tx.hex 25600 transactions. Speed: 0.005567 ms/transaction.
 ...
 ...
+```
+
+
+# Run ethtest
+
+
+```bash
+# run in project root folder:
+# generate deployment hex file required by ptxsema
+python3 json-to-hex.py resources/sdiv.json
+
+# generate PTX from the deployment hex
+export MAU_TRACE_PC=1
+python3 hex-to-ptx.py resources/sdiv.hex --cleanup
+
+# run the state test in the augustus/mau-ityfuzz:latest docker container
+cargo run --bin state_test ./resources/sdiv.json
 ```
