@@ -1,1 +1,4 @@
 /target
+GeneralStateTests/
+*.pyc
+goevm
