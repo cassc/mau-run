@@ -35,6 +35,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 TRACE_LINE_RE = re.compile(
     r"^\[TRACE\]\s+pc=0x(?P<pc>[0-9a-fA-F]+)\s+opcode=0x(?P<opcode>[0-9a-fA-F]+)"
+    r"(?:\s+first_stack=(?P<stack>0x[0-9a-fA-F]+|[-?])(?:\s+stack_depth=(?P<depth>\d+))?)?"
 )
 TRACE_HEADER_RE = re.compile(
     r"^\[TRACE\]\s+kernel=(?P<kernel>\w+)\s+records=(?P<count>\d+)"
@@ -62,6 +63,8 @@ class TraceCapture:
 
     pcs: list[int] = field(default_factory=list)
     opcodes: list[int] = field(default_factory=list)
+    first_stacks: list[str | None] = field(default_factory=list)
+    stack_depths: list[int | None] = field(default_factory=list)
     kernel: str | None = None
     raw_stdout: str = ""
     raw_stderr: str = ""
@@ -196,6 +199,25 @@ def ensure_binary_exists(binary: str) -> None:
     if candidate.exists() and os.access(candidate, os.X_OK):
         return
     raise FileNotFoundError(f"Required binary not found or not executable: {binary}")
+
+
+def normalize_stack_value(value: str | None) -> str | None:
+    """Normalize a stack word to a 0x-prefixed, 32-byte lowercase hex string."""
+    if value is None:
+        return None
+    token = value.strip()
+    if token in {"-", "?"}:
+        return None
+    if token.startswith(("0x", "0X")):
+        token = token[2:]
+    token = token.lower()
+    if not re.fullmatch(r"[0-9a-f]*", token):
+        return None
+    token = token.lstrip("0")
+    if not token:
+        token = "0"
+    token = token.zfill(64)
+    return "0x" + token[-64:]
 
 
 def match_any(patterns: Iterable[str], target: str) -> bool:
@@ -401,6 +423,15 @@ def parse_mau_trace(stdout: str, *, preferred_kernel: str) -> dict[str, TraceCap
         )
         capture.pcs.append(int(entry_match.group("pc"), 16))
         capture.opcodes.append(int(entry_match.group("opcode"), 16))
+        stack_token = entry_match.group("stack")
+        depth_token = entry_match.group("depth")
+        capture.first_stacks.append(normalize_stack_value(stack_token))
+        if depth_token is not None:
+            capture.stack_depths.append(int(depth_token))
+        elif stack_token == "-":
+            capture.stack_depths.append(0)
+        else:
+            capture.stack_depths.append(None)
     if not kernels and stdout:
         # No trace lines found; capture entire stdout for debugging.
         kernels["_raw"] = TraceCapture(
@@ -469,6 +500,20 @@ def parse_goevm_trace(output: str) -> TraceCapture:
                 capture.opcodes.append(opcode)
             else:
                 capture.opcodes.append(-1)
+            stack_list = obj.get("stack")
+            if isinstance(stack_list, list):
+                capture.stack_depths.append(len(stack_list))
+                if stack_list:
+                    top_val = stack_list[-1]
+                    if isinstance(top_val, str):
+                        capture.first_stacks.append(normalize_stack_value(top_val))
+                    else:
+                        capture.first_stacks.append(None)
+                else:
+                    capture.first_stacks.append(None)
+            else:
+                capture.stack_depths.append(None)
+                capture.first_stacks.append(None)
     capture.raw_stdout = output
     capture.raw_stderr = ""
     return capture
@@ -530,6 +575,57 @@ def compare_traces(
             return CaseReport(
                 case=case, status="trace-mismatch", detail=detail, mau=mau, goevm=goevm
             )
+    stack_lengths_ok = (
+        len(mau.stack_depths) == mau.pc_count
+        and len(goevm.stack_depths) == goevm.pc_count
+        and len(mau.first_stacks) == mau.pc_count
+        and len(goevm.first_stacks) == goevm.pc_count
+    )
+    can_compare_stacks = (
+        stack_lengths_ok
+        and all(d is not None for d in mau.stack_depths)
+        and all(d is not None for d in goevm.stack_depths)
+        and any(val is not None for val in mau.first_stacks)
+        and any(val is not None for val in goevm.first_stacks)
+    )
+    if can_compare_stacks:
+        for idx in range(mau.pc_count):
+            m_depth = mau.stack_depths[idx]
+            g_depth = goevm.stack_depths[idx]
+            if m_depth != g_depth:
+                detail = (
+                    f"Stack depth mismatch at step {idx}: "
+                    f"mau={m_depth}, goevm={g_depth}"
+                )
+                return CaseReport(
+                    case=case,
+                    status="stack-depth-mismatch",
+                    detail=detail,
+                    mau=mau,
+                    goevm=goevm,
+                )
+        for idx in range(mau.pc_count):
+            m_val = mau.first_stacks[idx]
+            g_val = goevm.first_stacks[idx]
+            if m_val is None and g_val is None:
+                continue
+            if m_val != g_val:
+                detail = (
+                    f"Top-of-stack mismatch at step {idx}: "
+                    f"mau={m_val or '-'}, goevm={g_val or '-'}"
+                )
+                return CaseReport(
+                    case=case,
+                    status="stack-mismatch",
+                    detail=detail,
+                    mau=mau,
+                    goevm=goevm,
+                )
+        detail = f"Traces and first stacks match (pcs={mau.pc_count})"
+        return CaseReport(
+            case=case, status="match", detail=detail, mau=mau, goevm=goevm
+        )
+
     detail = f"Traces match (pcs={mau.pc_count})"
     return CaseReport(case=case, status="match", detail=detail, mau=mau, goevm=goevm)
 
@@ -543,6 +639,10 @@ def write_summary(
             "match": sum(1 for r in reports if r.status == "match"),
             "pc_mismatch": sum(1 for r in reports if r.status == "pc-mismatch"),
             "trace_mismatch": sum(1 for r in reports if r.status == "trace-mismatch"),
+            "stack_mismatch": sum(1 for r in reports if r.status == "stack-mismatch"),
+            "stack_depth_mismatch": sum(
+                1 for r in reports if r.status == "stack-depth-mismatch"
+            ),
             "mau_trace_missing": sum(
                 1 for r in reports if r.status == "mau-trace-missing"
             ),
@@ -632,10 +732,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         write_summary(work_dir, reports, args.summary_json)
 
+        total_cases = len(reports)
         stats = {
             "match": sum(1 for r in reports if r.status == "match"),
             "pc_mismatch": sum(1 for r in reports if r.status == "pc-mismatch"),
             "trace_mismatch": sum(1 for r in reports if r.status == "trace-mismatch"),
+            "stack_mismatch": sum(1 for r in reports if r.status == "stack-mismatch"),
+            "stack_depth_mismatch": sum(
+                1 for r in reports if r.status == "stack-depth-mismatch"
+            ),
             "mau_missing": sum(1 for r in reports if r.status == "mau-trace-missing"),
             "goevm_missing": sum(
                 1 for r in reports if r.status == "goevm-trace-missing"
@@ -644,9 +749,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         }
         print("Summary:")
         print(
-            f"  Matches: {stats['match']}, "
+            f"  Total cases: {total_cases}, "
+            f"Matches: {stats['match']}, "
             f"PC mismatches: {stats['pc_mismatch']}, "
             f"Trace mismatches: {stats['trace_mismatch']}, "
+            f"Stack mismatches: {stats['stack_mismatch']}, "
+            f"Stack depth mismatches: {stats['stack_depth_mismatch']}, "
             f"Mau missing: {stats['mau_missing']}, "
             f"go-ethereum missing: {stats['goevm_missing']}, "
             f"Errors: {stats['error']}"
