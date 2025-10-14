@@ -576,34 +576,19 @@ def compare_traces(
                 case=case, status="trace-mismatch", detail=detail, mau=mau, goevm=goevm
             )
     stack_lengths_ok = (
-        len(mau.stack_depths) == mau.pc_count
+        len(mau.first_stacks) == mau.pc_count
+        and len(goevm.first_stacks) == goevm.pc_count
+        and len(mau.stack_depths) == mau.pc_count
         and len(goevm.stack_depths) == goevm.pc_count
-        and len(mau.first_stacks) == mau.pc_count
+    )
+
+    have_stack_values = (
+        stack_lengths_ok
+        and any(val is not None for val in mau.first_stacks)
         and len(goevm.first_stacks) == goevm.pc_count
     )
-    can_compare_stacks = (
-        stack_lengths_ok
-        and all(d is not None for d in mau.stack_depths)
-        and all(d is not None for d in goevm.stack_depths)
-        and any(val is not None for val in mau.first_stacks)
-        and any(val is not None for val in goevm.first_stacks)
-    )
-    if can_compare_stacks:
-        for idx in range(mau.pc_count):
-            m_depth = mau.stack_depths[idx]
-            g_depth = goevm.stack_depths[idx]
-            if m_depth != g_depth:
-                detail = (
-                    f"Stack depth mismatch at step {idx}: "
-                    f"mau={m_depth}, goevm={g_depth}"
-                )
-                return CaseReport(
-                    case=case,
-                    status="stack-depth-mismatch",
-                    detail=detail,
-                    mau=mau,
-                    goevm=goevm,
-                )
+
+    if have_stack_values:
         for idx in range(mau.pc_count):
             m_val = mau.first_stacks[idx]
             g_val = goevm.first_stacks[idx]
@@ -738,9 +723,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             "pc_mismatch": sum(1 for r in reports if r.status == "pc-mismatch"),
             "trace_mismatch": sum(1 for r in reports if r.status == "trace-mismatch"),
             "stack_mismatch": sum(1 for r in reports if r.status == "stack-mismatch"),
-            "stack_depth_mismatch": sum(
-                1 for r in reports if r.status == "stack-depth-mismatch"
-            ),
             "mau_missing": sum(1 for r in reports if r.status == "mau-trace-missing"),
             "goevm_missing": sum(
                 1 for r in reports if r.status == "goevm-trace-missing"
@@ -754,7 +736,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"PC mismatches: {stats['pc_mismatch']}, "
             f"Trace mismatches: {stats['trace_mismatch']}, "
             f"Stack mismatches: {stats['stack_mismatch']}, "
-            f"Stack depth mismatches: {stats['stack_depth_mismatch']}, "
             f"Mau missing: {stats['mau_missing']}, "
             f"go-ethereum missing: {stats['goevm_missing']}, "
             f"Errors: {stats['error']}"

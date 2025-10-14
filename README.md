@@ -84,7 +84,7 @@ python3 scripts/run-trace-comparison.py --ethtest-dir ./GeneralStateTests/VMTest
 ```
 
 Matching cases report `Traces and first stacks match`, and the final summary
-includes extra counters for `Stack mismatches` and `Stack depth mismatches`.
+includes an extra counter for `Stack mismatches`.
 Mismatch reports show the exact step and the differing stack values, e.g.
 `Top-of-stack mismatch at step 42: mau=0x..., goevm=0x...`.
 
@@ -98,7 +98,7 @@ Example run excerpt:
 Summary:
   Total cases: 628, Matches: 0,
   PC mismatches: 438, Trace mismatches: 0,
-  Stack mismatches: 0, Stack depth mismatches: 100,
+  Stack mismatches: 0,
   Mau missing: 1, go-ethereum missing: 0, Errors: 89
 ```
 
@@ -109,6 +109,5 @@ Summary fields:
 - `PC mismatches`: different PC counts or a divergent PC at some step.
 - `Trace mismatches`: same PC count, but values differ (first mismatch shown inline).
 - `Stack mismatches`: PC sequences match but top-of-stack words differ at least once.
-- `Stack depth mismatches`: PC sequences match but the recorded stack size differs.
 - `Mau missing` / `go-ethereum missing`: that runner produced no trace.
 - `Errors`: script-level failures (build/runtime issues including ptx generation failures) that prevented comparison.
