@@ -236,7 +236,10 @@ def expand_ethtests(args: argparse.Namespace, work_dir: Path) -> list[ExpandedTe
 
             post = body.get("post", {}).get(args.fork)
             if not post:
-                debug(f"Skipping {case_identifier} (missing post for {args.fork})", args=args)
+                debug(
+                    f"Skipping {case_identifier} (missing post for {args.fork})",
+                    args=args,
+                )
                 continue
 
             tx_data = transaction.get("data") or []
@@ -367,7 +370,7 @@ def build_ptx(case: ExpandedTestCase, args: argparse.Namespace) -> None:
     env = os.environ.copy()
     env.setdefault("MAU_TRACE_PC", "1")
     resources_dir = REPO_ROOT / "resources"
-    env["PATH"] = f"{resources_dir}:{env.get('PATH','')}"
+    env["PATH"] = f"{resources_dir}:{env.get('PATH', '')}"
     result = run_subprocess(cmd, cwd=REPO_ROOT, env=env, timeout=args.ptx_timeout)
     case.variant_dir.joinpath("hex-to-ptx.stdout.txt").write_text(result.stdout)
     case.variant_dir.joinpath("hex-to-ptx.stderr.txt").write_text(result.stderr)
@@ -393,12 +396,16 @@ def parse_mau_trace(stdout: str, *, preferred_kernel: str) -> dict[str, TraceCap
         entry_match = TRACE_LINE_RE.match(line)
         if not entry_match:
             continue
-        capture = kernels.setdefault(current_kernel, TraceCapture(kernel=current_kernel))
+        capture = kernels.setdefault(
+            current_kernel, TraceCapture(kernel=current_kernel)
+        )
         capture.pcs.append(int(entry_match.group("pc"), 16))
         capture.opcodes.append(int(entry_match.group("opcode"), 16))
     if not kernels and stdout:
         # No trace lines found; capture entire stdout for debugging.
-        kernels["_raw"] = TraceCapture(pcs=[], opcodes=[], kernel=None, raw_stdout=stdout)
+        kernels["_raw"] = TraceCapture(
+            pcs=[], opcodes=[], kernel=None, raw_stdout=stdout
+        )
     return kernels
 
 
@@ -415,7 +422,9 @@ def run_mau(case: ExpandedTestCase, args: argparse.Namespace) -> TraceCapture:
     case.variant_dir.joinpath("mau.stdout.txt").write_text(result.stdout)
     case.variant_dir.joinpath("mau.stderr.txt").write_text(result.stderr)
     if result.returncode != 0:
-        raise RuntimeError(f"Mau execution failed ({result.returncode}) for {case.case_id}")
+        raise RuntimeError(
+            f"Mau execution failed ({result.returncode}) for {case.case_id}"
+        )
 
     kernels = parse_mau_trace(result.stdout, preferred_kernel=args.mau_kernel)
     target_kernel = args.mau_kernel
@@ -480,44 +489,77 @@ def run_goevm(case: ExpandedTestCase, args: argparse.Namespace) -> TraceCapture:
     # go-ethereum writes traces to stderr
     output = result.stderr or result.stdout
     if result.returncode != 0:
-        raise RuntimeError(f"go-ethereum execution failed ({result.returncode}) for {case.case_id}")
+        raise RuntimeError(
+            f"go-ethereum execution failed ({result.returncode}) for {case.case_id}"
+        )
     capture = parse_goevm_trace(output)
     capture.raw_stdout = result.stdout
     capture.raw_stderr = result.stderr
     return capture
 
 
-def compare_traces(case: ExpandedTestCase, mau: TraceCapture, goevm: TraceCapture) -> CaseReport:
+def compare_traces(
+    case: ExpandedTestCase, mau: TraceCapture, goevm: TraceCapture
+) -> CaseReport:
     if not mau.pcs:
-        return CaseReport(case=case, status="mau-trace-missing", detail="No Mau trace captured", mau=mau, goevm=goevm)
+        return CaseReport(
+            case=case,
+            status="mau-trace-missing",
+            detail="No Mau trace captured",
+            mau=mau,
+            goevm=goevm,
+        )
     if not goevm.pcs:
-        return CaseReport(case=case, status="goevm-trace-missing", detail="No go-ethereum trace captured", mau=mau, goevm=goevm)
+        return CaseReport(
+            case=case,
+            status="goevm-trace-missing",
+            detail="No go-ethereum trace captured",
+            mau=mau,
+            goevm=goevm,
+        )
 
     if mau.pc_count != goevm.pc_count:
         detail = f"PC count mismatch (mau={mau.pc_count}, goevm={goevm.pc_count})"
-        return CaseReport(case=case, status="pc-mismatch", detail=detail, mau=mau, goevm=goevm)
+        return CaseReport(
+            case=case, status="pc-mismatch", detail=detail, mau=mau, goevm=goevm
+        )
 
     for idx, (m_pc, g_pc) in enumerate(zip(mau.pcs, goevm.pcs)):
         if m_pc != g_pc:
             detail = f"Trace mismatch at step {idx}: mau=0x{m_pc:x}, goevm=0x{g_pc:x}"
-            return CaseReport(case=case, status="trace-mismatch", detail=detail, mau=mau, goevm=goevm)
+            return CaseReport(
+                case=case, status="trace-mismatch", detail=detail, mau=mau, goevm=goevm
+            )
     detail = f"Traces match (pcs={mau.pc_count})"
     return CaseReport(case=case, status="match", detail=detail, mau=mau, goevm=goevm)
 
 
-def write_summary(work_dir: Path, reports: list[CaseReport], summary_path: Path | None) -> None:
+def write_summary(
+    work_dir: Path, reports: list[CaseReport], summary_path: Path | None
+) -> None:
     summary = {
         "stats": {
             "total": len(reports),
             "match": sum(1 for r in reports if r.status == "match"),
             "pc_mismatch": sum(1 for r in reports if r.status == "pc-mismatch"),
             "trace_mismatch": sum(1 for r in reports if r.status == "trace-mismatch"),
-            "mau_trace_missing": sum(1 for r in reports if r.status == "mau-trace-missing"),
-            "goevm_trace_missing": sum(1 for r in reports if r.status == "goevm-trace-missing"),
+            "mau_trace_missing": sum(
+                1 for r in reports if r.status == "mau-trace-missing"
+            ),
+            "goevm_trace_missing": sum(
+                1 for r in reports if r.status == "goevm-trace-missing"
+            ),
             "failures": sum(
                 1
                 for r in reports
-                if r.status not in {"match", "pc-mismatch", "trace-mismatch", "mau-trace-missing", "goevm-trace-missing"}
+                if r.status
+                not in {
+                    "match",
+                    "pc-mismatch",
+                    "trace-mismatch",
+                    "mau-trace-missing",
+                    "goevm-trace-missing",
+                }
             ),
         },
         "cases": [
@@ -595,7 +637,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             "pc_mismatch": sum(1 for r in reports if r.status == "pc-mismatch"),
             "trace_mismatch": sum(1 for r in reports if r.status == "trace-mismatch"),
             "mau_missing": sum(1 for r in reports if r.status == "mau-trace-missing"),
-            "goevm_missing": sum(1 for r in reports if r.status == "goevm-trace-missing"),
+            "goevm_missing": sum(
+                1 for r in reports if r.status == "goevm-trace-missing"
+            ),
             "error": sum(1 for r in reports if r.status == "error"),
         }
         print("Summary:")
