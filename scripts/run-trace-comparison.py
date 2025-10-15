@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
@@ -338,20 +339,37 @@ def run_subprocess(
     timeout: float | None = None,
 ) -> subprocess.CompletedProcess[str]:
     cmd_list = list(map(str, cmd))
+    process = subprocess.Popen(
+        cmd_list,
+        cwd=str(cwd) if cwd else None,
+        env=dict(env) if env else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
     try:
-        return subprocess.run(
-            cmd_list,
-            cwd=str(cwd) if cwd else None,
-            env=dict(env) if env else None,
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
+        stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired as exc:
+        # Ensure the entire process group is terminated to avoid orphaned workers.
+        try:
+            if os.name != "nt":
+                os.killpg(process.pid, signal.SIGKILL)
+            else:
+                process.kill()
+        except ProcessLookupError:
+            pass
+        finally:
+            stdout, stderr = process.communicate()
         raise TimeoutError(
             f"Command '{' '.join(cmd_list)}' timed out after {timeout} seconds"
         ) from exc
+    return subprocess.CompletedProcess(
+        args=cmd_list,
+        returncode=process.returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
 
 
 def build_hex(case: ExpandedTestCase, args: argparse.Namespace) -> None:
