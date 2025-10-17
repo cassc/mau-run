@@ -107,8 +107,8 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--geth-bin",
-        default="evm",
-        help="Path to the go-ethereum `evm` binary (default: evm).",
+        default=str(REPO_ROOT / "resources" / "goevm-glibc2.31-bin"),
+        help="Path to the go-ethereum-compatible runner (default: resources/goevm-glibc2.31-bin).",
     )
     parser.add_argument(
         "--mau-bin",
@@ -179,6 +179,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=int,
         default=10,
         help="Timeout in seconds for hex-to-ptx.py (default: 10).",
+    )
+    parser.add_argument(
+        "--mau-docker-image",
+        default=None,
+        help="If set, run Mau inside this Docker image (e.g. augustus/mau-ityfuzz:latest).",
+    )
+    parser.add_argument(
+        "--mau-docker-gpus",
+        default="all",
+        help="Value passed to `docker run --gpus` when using --mau-docker-image (default: all).",
     )
     parser.add_argument(
         "--summary-json",
@@ -458,16 +468,78 @@ def parse_mau_trace(stdout: str, *, preferred_kernel: str) -> dict[str, TraceCap
     return kernels
 
 
+def run_mau_in_docker(
+    case: ExpandedTestCase, args: argparse.Namespace, env: Mapping[str, str]
+) -> subprocess.CompletedProcess[str]:
+    docker_cmd: list[str] = ["docker", "run", "--rm"]
+
+    gpus = getattr(args, "mau_docker_gpus", None)
+    if gpus:
+        docker_cmd.extend(["--gpus", gpus])
+
+    if os.name != "nt":
+        try:
+            uid = os.getuid()
+            gid = os.getgid()
+        except AttributeError:
+            uid = gid = None
+        if uid is not None and gid is not None:
+            docker_cmd.extend(["--user", f"{uid}:{gid}"])
+
+    mount_dirs: set[str] = {str(REPO_ROOT.resolve())}
+    for path in (
+        case.variant_dir,
+        case.expanded_json.parent,
+        case.hex_path.parent,
+        case.ptx_path.parent,
+    ):
+        mount_dirs.add(str(path.resolve()))
+
+    for mount in sorted(mount_dirs):
+        docker_cmd.extend(["-v", f"{mount}:{mount}"])
+
+    docker_cmd.extend(["-w", str(REPO_ROOT.resolve())])
+
+    forwarded_env = {
+        key: env[key]
+        for key in (
+            "MAU_TRACE_PC",
+            "MAU_TRACE_STACK",
+            "CUDA_VISIBLE_DEVICES",
+            "RUST_LOG",
+        )
+        if key in env and env[key] is not None
+    }
+    for key, value in sorted(forwarded_env.items()):
+        docker_cmd.extend(["-e", f"{key}={value}"])
+
+    docker_cmd.append(args.mau_docker_image)
+
+    docker_cmd.append(str(args.mau_bin))
+    docker_cmd.extend(
+        [
+            str(case.expanded_json.resolve()),
+            str(case.ptx_path.resolve()),
+            str(case.hex_path.resolve()),
+        ]
+    )
+
+    return run_subprocess(docker_cmd, timeout=args.mau_timeout)
+
+
 def run_mau(case: ExpandedTestCase, args: argparse.Namespace) -> TraceCapture:
-    cmd = [
-        args.mau_bin,
-        str(case.expanded_json),
-        str(case.ptx_path),
-        str(case.hex_path),
-    ]
     env = os.environ.copy()
     env.setdefault("MAU_TRACE_PC", "1")
-    result = run_subprocess(cmd, cwd=REPO_ROOT, env=env, timeout=args.mau_timeout)
+    if args.mau_docker_image:
+        result = run_mau_in_docker(case, args, env)
+    else:
+        cmd = [
+            args.mau_bin,
+            str(case.expanded_json),
+            str(case.ptx_path),
+            str(case.hex_path),
+        ]
+        result = run_subprocess(cmd, cwd=REPO_ROOT, env=env, timeout=args.mau_timeout)
     case.variant_dir.joinpath("mau.stdout.txt").write_text(result.stdout)
     case.variant_dir.joinpath("mau.stderr.txt").write_text(result.stderr)
     if result.returncode != 0:
@@ -684,11 +756,18 @@ def write_summary(
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
 
-    try:
-        ensure_binary_exists(args.mau_bin)
-    except FileNotFoundError as exc:
-        print(exc, file=sys.stderr)
-        return 1
+    if args.mau_docker_image:
+        try:
+            ensure_binary_exists("docker")
+        except FileNotFoundError as exc:
+            print(exc, file=sys.stderr)
+            return 1
+    else:
+        try:
+            ensure_binary_exists(args.mau_bin)
+        except FileNotFoundError as exc:
+            print(exc, file=sys.stderr)
+            return 1
 
     try:
         ensure_binary_exists(args.geth_bin)
@@ -703,6 +782,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         work_dir = Path(tempfile.mkdtemp(prefix="trace-comparison-", dir=os.getcwd()))
         created_tmp = True
+
+    args.work_dir = work_dir
 
     print(f"Artifacts will be written to {work_dir}")
 
