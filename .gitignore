@@ -1,1 +1,5 @@
 /target
+GeneralStateTests/
+*.pyc
+goevm
+.venv/
