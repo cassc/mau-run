@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Dict, Optional, Tuple, cast
 
-JSONDict = dict[str, Any]
+JSONDict = Dict[str, Any]
 
 
 def parse_args() -> argparse.Namespace:
@@ -44,7 +44,7 @@ def push(value: int) -> bytes:
     return bytes([0x5F + byte_len]) + value.to_bytes(byte_len, "big")
 
 
-def select_test(data: JSONDict, test_name: str | None) -> tuple[str, JSONDict]:
+def select_test(data: JSONDict, test_name: Optional[str]) -> Tuple[str, JSONDict]:
     if test_name:
         try:
             candidate = data[test_name]
@@ -67,25 +67,24 @@ def normalize_hex(value: str) -> str:
     return value if value.startswith("0x") else f"0x{value}"
 
 
-def resolve_account(doc: JSONDict, account_arg: str | None) -> tuple[str, JSONDict]:
-    pre_state_raw: dict[str, Any] = doc.get("pre", {})
-    pre_state: dict[str, Any] = {}
-    for addr, entry in pre_state_raw.items():
-        if not isinstance(entry, dict):
-            raise ValueError(f"Pre-state entry for {addr} is not an object.")
-        pre_state[addr] = entry
+def resolve_account(doc: JSONDict, account_arg: Optional[str]) -> Tuple[str, JSONDict]:
+    pre_state: Dict[str, JSONDict] = doc.get("pre", {})
 
     if account_arg:
         target = normalize_hex(account_arg)
     else:
-        tx_obj: dict[str, Any] | None = doc.get("transaction")
-        tx_to = cast(str, tx_obj.get("to")) if isinstance(tx_obj, dict) else None
+        tx_obj: Optional[Dict[str, Any]] = doc.get("transaction")
+        tx_to: Optional[str] = None
+        if isinstance(tx_obj, dict):
+            candidate = tx_obj.get("to")
+            if isinstance(candidate, str):
+                tx_to = candidate
         if not tx_to:
             raise ValueError("No account provided and transaction 'to' field missing; use --account.")
         target = normalize_hex(tx_to)
 
-    normalized_pre: dict[str, JSONDict] = {
-        normalize_hex(addr): cast(JSONDict, data) for addr, data in pre_state.items()
+    normalized_pre: Dict[str, JSONDict] = {
+        normalize_hex(addr): data for addr, data in pre_state.items()
     }
     account_doc = normalized_pre.get(target)
     if account_doc is None:

@@ -509,7 +509,7 @@ def run_mau_in_docker(
             "CUDA_VISIBLE_DEVICES",
             "RUST_LOG",
         )
-        if key in env 
+        if key in env
     }
     for key, value in sorted(forwarded_env.items()):
         docker_cmd.extend(["-e", f"{key}={value}"])
@@ -580,7 +580,11 @@ def parse_goevm_trace(output: str) -> TraceCapture:
             pc_value = obj_dict["pc"]
             pc: int
             if isinstance(pc_value, str):
-                pc = int(pc_value, 16) if pc_value.startswith("0x") else int(pc_value, 10)
+                pc = (
+                    int(pc_value, 16)
+                    if pc_value.startswith("0x")
+                    else int(pc_value, 10)
+                )
             elif isinstance(pc_value, int):
                 pc = pc_value
             else:
