@@ -3,7 +3,9 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any, Dict, Tuple
+from typing import Any, cast
+
+JSONDict = dict[str, Any]
 
 
 def parse_args() -> argparse.Namespace:
@@ -42,14 +44,20 @@ def push(value: int) -> bytes:
     return bytes([0x5F + byte_len]) + value.to_bytes(byte_len, "big")
 
 
-def select_test(data: Dict[str, Any], test_name: str | None) -> Tuple[str, Dict[str, Any]]:
+def select_test(data: JSONDict, test_name: str | None) -> tuple[str, JSONDict]:
     if test_name:
         try:
-            return test_name, data[test_name]
+            candidate = data[test_name]
         except KeyError as exc:
             raise KeyError(f"Test '{test_name}' not found in JSON file.") from exc
+        if not isinstance(candidate, dict):
+            raise ValueError(f"Test '{test_name}' is not a JSON object.")
+        return test_name, cast(JSONDict, candidate)
     if len(data) == 1:
-        return next(iter(data.items()))
+        only_key, only_value = next(iter(data.items()))
+        if not isinstance(only_value, dict):
+            raise ValueError(f"Test '{only_key}' is not a JSON object.")
+        return only_key, cast(JSONDict, only_value)
     available = ", ".join(sorted(data.keys()))
     raise ValueError(f"Multiple tests found ({available}); specify one with --test.")
 
@@ -59,20 +67,26 @@ def normalize_hex(value: str) -> str:
     return value if value.startswith("0x") else f"0x{value}"
 
 
-def resolve_account(doc: Dict[str, Any], account_arg: str | None) -> Tuple[str, Dict[str, Any]]:
-    pre_state = doc.get("pre") or {}
-    if not isinstance(pre_state, dict):
-        raise ValueError("Invalid JSON structure: expected 'pre' to be a dict.")
+def resolve_account(doc: JSONDict, account_arg: str | None) -> tuple[str, JSONDict]:
+    pre_state_raw: dict[str, Any] = doc.get("pre", {})
+    pre_state: dict[str, Any] = {}
+    for addr, entry in pre_state_raw.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"Pre-state entry for {addr} is not an object.")
+        pre_state[addr] = entry
 
     if account_arg:
         target = normalize_hex(account_arg)
     else:
-        tx_to = doc.get("transaction", {}).get("to")
+        tx_obj: dict[str, Any] | None = doc.get("transaction")
+        tx_to = cast(str, tx_obj.get("to")) if isinstance(tx_obj, dict) else None
         if not tx_to:
             raise ValueError("No account provided and transaction 'to' field missing; use --account.")
         target = normalize_hex(tx_to)
 
-    normalized_pre = {normalize_hex(addr): data for addr, data in pre_state.items()}
+    normalized_pre: dict[str, JSONDict] = {
+        normalize_hex(addr): cast(JSONDict, data) for addr, data in pre_state.items()
+    }
     account_doc = normalized_pre.get(target)
     if account_doc is None:
         available = ", ".join(sorted(normalized_pre.keys()))
@@ -80,7 +94,7 @@ def resolve_account(doc: Dict[str, Any], account_arg: str | None) -> Tuple[str, 
     return target, account_doc
 
 
-def load_runtime(account_doc: Dict[str, Any]) -> bytes:
+def load_runtime(account_doc: JSONDict) -> bytes:
     code_hex = account_doc.get("code", "")
     if not isinstance(code_hex, str):
         raise ValueError("Invalid JSON structure: expected 'code' to be a hex string.")
@@ -112,7 +126,10 @@ def build_creation(runtime: bytes) -> bytes:
 
 def main() -> None:
     args = parse_args()
-    data = json.loads(args.json_path.read_text())
+    raw_data = json.loads(args.json_path.read_text())
+    if not isinstance(raw_data, dict):
+        raise ValueError("Top-level JSON structure must be an object.")
+    data = cast(JSONDict, raw_data)
     test_name, doc = select_test(data, args.test_name)
     account_address, account_doc = resolve_account(doc, args.account)
     runtime = load_runtime(account_doc)

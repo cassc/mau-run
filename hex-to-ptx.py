@@ -86,6 +86,11 @@ def enforce_kernel_entries(ptx_path: Path) -> None:
         print("No kernel patch applied (entries already exported?)")
 
 
+def _which_path(name: str) -> Path | None:
+    found = shutil.which(name)
+    return Path(found) if found else None
+
+
 def main() -> None:
     args = parse_args()
     hex_path = args.hex_path.resolve()
@@ -101,7 +106,7 @@ def main() -> None:
         (
             Path("./ptxsema"),
             Path("./resources/ptxsema"),
-            Path(shutil.which("ptxsema")) if shutil.which("ptxsema") else None,
+            _which_path("ptxsema"),
         ),
         "ptxsema",
     )
@@ -110,8 +115,8 @@ def main() -> None:
         (
             Path("llc-16") if Path("llc-16").exists() else None,
             Path("./resources/llc-16") if Path("./resources/llc-16").exists() else None,
-            Path(shutil.which("llc-16")) if shutil.which("llc-16") else None,
-            Path(shutil.which("llc")) if shutil.which("llc") else None,
+            _which_path("llc-16"),
+            _which_path("llc"),
         ),
         "llc",
     )

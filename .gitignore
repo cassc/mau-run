@@ -2,3 +2,4 @@
 GeneralStateTests/
 *.pyc
 goevm
+.venv/

@@ -21,7 +21,7 @@ import tempfile
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence, cast
 
 EXCLUDE_TESTS = [
     # Add any test patterns to exclude here
@@ -62,10 +62,10 @@ class ExpandedTestCase:
 class TraceCapture:
     """Holds trace details for an executor run."""
 
-    pcs: list[int] = field(default_factory=list)
-    opcodes: list[int] = field(default_factory=list)
-    first_stacks: list[str | None] = field(default_factory=list)
-    stack_depths: list[int | None] = field(default_factory=list)
+    pcs: list[int] = field(default_factory=lambda: [])
+    opcodes: list[int] = field(default_factory=lambda: [])
+    first_stacks: list[str | None] = field(default_factory=lambda: [])
+    stack_depths: list[int | None] = field(default_factory=lambda: [])
     kernel: str | None = None
     raw_stdout: str = ""
     raw_stderr: str = ""
@@ -275,12 +275,12 @@ def expand_ethtests(args: argparse.Namespace, work_dir: Path) -> list[ExpandedTe
                 )
                 continue
 
-            tx_data = transaction.get("data") or []
-            tx_gas = transaction.get("gasLimit") or []
-            tx_value = transaction.get("value") or []
+            tx_data: list[str] = transaction.get("data") or []
+            tx_gas: list[str] = transaction.get("gasLimit") or []
+            tx_value: list[str] = transaction.get("value") or []
 
             for entry in post:
-                indexes = entry.get("indexes") or {}
+                indexes: dict[str, int] = entry.get("indexes") or {}
                 try:
                     data_index = int(indexes["data"])
                     gas_index = int(indexes["gas"])
@@ -439,6 +439,7 @@ def parse_mau_trace(stdout: str, *, preferred_kernel: str) -> dict[str, TraceCap
         header_match = TRACE_HEADER_RE.match(line)
         if header_match:
             current_kernel = header_match.group("kernel")
+            assert current_kernel is not None  # Type narrowing for setdefault
             kernels.setdefault(current_kernel, TraceCapture(kernel=current_kernel))
             continue
         if current_kernel is None:
@@ -508,7 +509,7 @@ def run_mau_in_docker(
             "CUDA_VISIBLE_DEVICES",
             "RUST_LOG",
         )
-        if key in env and env[key] is not None
+        if key in env 
     }
     for key, value in sorted(forwarded_env.items()):
         docker_cmd.extend(["-e", f"{key}={value}"])
@@ -533,7 +534,7 @@ def run_mau(case: ExpandedTestCase, args: argparse.Namespace) -> TraceCapture:
     if args.mau_docker_image:
         result = run_mau_in_docker(case, args, env)
     else:
-        cmd = [
+        cmd: list[str] = [
             args.mau_bin,
             str(case.expanded_json),
             str(case.ptx_path),
@@ -575,26 +576,33 @@ def parse_goevm_trace(output: str) -> TraceCapture:
         except json.JSONDecodeError:
             continue
         if isinstance(obj, dict) and "pc" in obj:
-            pc = obj["pc"]
-            if isinstance(pc, str):
-                pc = int(pc, 16) if pc.startswith("0x") else int(pc, 10)
-            capture.pcs.append(int(pc))
-            opcode = obj.get("op")
-            if isinstance(opcode, str):
+            obj_dict = cast(dict[str, Any], obj)
+            pc_value = obj_dict["pc"]
+            pc: int
+            if isinstance(pc_value, str):
+                pc = int(pc_value, 16) if pc_value.startswith("0x") else int(pc_value, 10)
+            elif isinstance(pc_value, int):
+                pc = pc_value
+            else:
+                pc = int(pc_value)
+            capture.pcs.append(pc)
+            opcode_value = obj_dict.get("op")
+            if isinstance(opcode_value, str):
                 # 'op' may be an opcode name; skip if not numeric.
                 try:
-                    capture.opcodes.append(int(opcode, 16))
+                    capture.opcodes.append(int(opcode_value, 16))
                 except ValueError:
                     capture.opcodes.append(-1)
-            elif isinstance(opcode, int):
-                capture.opcodes.append(opcode)
+            elif isinstance(opcode_value, int):
+                capture.opcodes.append(opcode_value)
             else:
                 capture.opcodes.append(-1)
-            stack_list = obj.get("stack")
-            if isinstance(stack_list, list):
+            stack_list_raw = obj_dict.get("stack")
+            if isinstance(stack_list_raw, list):
+                stack_list = cast(list[Any], stack_list_raw)
                 capture.stack_depths.append(len(stack_list))
                 if stack_list:
-                    top_val = stack_list[-1]
+                    top_val: Any = stack_list[-1]
                     if isinstance(top_val, str):
                         capture.first_stacks.append(normalize_stack_value(top_val))
                     else:
@@ -610,8 +618,8 @@ def parse_goevm_trace(output: str) -> TraceCapture:
 
 
 def run_goevm(case: ExpandedTestCase, args: argparse.Namespace) -> TraceCapture:
-    cmd = [
-        args.geth_bin,
+    cmd: list[str] = [
+        str(args.geth_bin),
         "--json",
         "--noreturndata",
         "--nomemory",
@@ -708,7 +716,7 @@ def compare_traces(
 def write_summary(
     work_dir: Path, reports: list[CaseReport], summary_path: Path | None
 ) -> None:
-    summary = {
+    summary: dict[str, Any] = {
         "stats": {
             "total": len(reports),
             "match": sum(1 for r in reports if r.status == "match"),
