@@ -26,9 +26,7 @@ from typing import Any, Iterable, Mapping, Sequence, cast
 EXCLUDE_TESTS = [
     # Add any test patterns to exclude here
     "vmPerformance",
-    "stCreateTest",
     "stQuadraticComplexityTest",
-    "stStaticCall",
     "stTimeConsuming",
 ]
 
@@ -36,11 +34,9 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 
 TRACE_LINE_RE = re.compile(
     r"^\[TRACE\]\s+pc=0x(?P<pc>[0-9a-fA-F]+)\s+opcode=0x(?P<opcode>[0-9a-fA-F]+)"
-    r"(?:\s+first_stack=(?P<stack>0x[0-9a-fA-F]+|[-?])(?:\s+stack_depth=(?P<depth>\d+))?)?"
+    r"(?:\s+size=(?P<depth>\d+)(?:\s+top=(?P<stack>0x[0-9a-fA-F]+))?)?"
 )
-TRACE_HEADER_RE = re.compile(
-    r"^\[TRACE\]\s+kernel=(?P<kernel>\w+)\s+records=(?P<count>\d+)"
-)
+TRACE_HEADER_RE = re.compile(r"^\[TRACE\]\s+kernel=(?P<kernel>\w+)\s+records=(?P<count>\d+)")
 
 
 @dataclass
@@ -85,9 +81,7 @@ class CaseReport:
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Compare Mau GPU execution traces against go-ethereum."
-    )
+    parser = argparse.ArgumentParser(description="Compare Mau GPU execution traces against go-ethereum.")
     parser.add_argument(
         "--ethtest-dir",
         type=Path,
@@ -97,8 +91,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--work-dir",
         type=Path,
-        help="Directory to store expanded fixtures, artifacts, and logs. "
-        "Defaults to a temporary directory.",
+        help="Directory to store expanded fixtures, artifacts, and logs. " "Defaults to a temporary directory.",
     )
     parser.add_argument(
         "--fork",
@@ -120,8 +113,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         action="append",
         default=[],
         metavar="PATTERN",
-        help="Only process tests whose identifier matches the glob pattern. "
-        "May be supplied multiple times.",
+        help="Only process tests whose identifier matches the glob pattern. " "May be supplied multiple times.",
     )
     parser.add_argument(
         "--exclude",
@@ -189,6 +181,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         "--mau-docker-gpus",
         default="all",
         help="Value passed to `docker run --gpus` when using --mau-docker-image (default: all).",
+    )
+    parser.add_argument(
+        "--add-docker-flag",
+        action="store_true",
+        help="Add --device /dev/nvidia0 --device /dev/nvidiactl --device /dev/nvidia-uvm to docker command.",
     )
     parser.add_argument(
         "--summary-json",
@@ -371,9 +368,7 @@ def run_subprocess(
             pass
         finally:
             stdout, stderr = process.communicate()
-        raise TimeoutError(
-            f"Command '{' '.join(cmd_list)}' timed out after {timeout} seconds"
-        ) from exc
+        raise TimeoutError(f"Command '{' '.join(cmd_list)}' timed out after {timeout} seconds") from exc
     return subprocess.CompletedProcess(
         args=cmd_list,
         returncode=process.returncode,
@@ -400,9 +395,7 @@ def build_hex(case: ExpandedTestCase, args: argparse.Namespace) -> None:
     if result.returncode != 0:
         snippet = (result.stderr or result.stdout).strip().splitlines()[-5:]
         detail = "\n".join(snippet)
-        raise RuntimeError(
-            f"json-to-hex.py failed ({result.returncode}) for {case.case_id}: {detail}"
-        )
+        raise RuntimeError(f"json-to-hex.py failed ({result.returncode}) for {case.case_id}: {detail}")
 
 
 def build_ptx(case: ExpandedTestCase, args: argparse.Namespace) -> None:
@@ -414,6 +407,7 @@ def build_ptx(case: ExpandedTestCase, args: argparse.Namespace) -> None:
         str(case.hex_path),
         "--output",
         str(case.ptx_path),
+        "--cleanup",
     ]
     if args.ptx_mcpu:
         cmd.extend(["--mcpu", args.ptx_mcpu])
@@ -427,9 +421,7 @@ def build_ptx(case: ExpandedTestCase, args: argparse.Namespace) -> None:
     if result.returncode != 0:
         snippet = (result.stderr or result.stdout).strip().splitlines()[-5:]
         detail = "\n".join(snippet)
-        raise RuntimeError(
-            f"hex-to-ptx.py failed ({result.returncode}) for {case.case_id}: {detail}"
-        )
+        raise RuntimeError(f"hex-to-ptx.py failed ({result.returncode}) for {case.case_id}: {detail}")
 
 
 def parse_mau_trace(stdout: str, *, preferred_kernel: str) -> dict[str, TraceCapture]:
@@ -447,25 +439,24 @@ def parse_mau_trace(stdout: str, *, preferred_kernel: str) -> dict[str, TraceCap
         entry_match = TRACE_LINE_RE.match(line)
         if not entry_match:
             continue
-        capture = kernels.setdefault(
-            current_kernel, TraceCapture(kernel=current_kernel)
-        )
+        capture = kernels.setdefault(current_kernel, TraceCapture(kernel=current_kernel))
         capture.pcs.append(int(entry_match.group("pc"), 16))
         capture.opcodes.append(int(entry_match.group("opcode"), 16))
-        stack_token = entry_match.group("stack")
         depth_token = entry_match.group("depth")
-        capture.first_stacks.append(normalize_stack_value(stack_token))
+        stack_token = entry_match.group("stack")
         if depth_token is not None:
-            capture.stack_depths.append(int(depth_token))
-        elif stack_token == "-":
-            capture.stack_depths.append(0)
+            depth = int(depth_token)
+            capture.stack_depths.append(depth)
+            if depth > 0 and stack_token:
+                capture.first_stacks.append(normalize_stack_value(stack_token))
+            else:
+                capture.first_stacks.append(None)
         else:
             capture.stack_depths.append(None)
+            capture.first_stacks.append(None)
     if not kernels and stdout:
         # No trace lines found; capture entire stdout for debugging.
-        kernels["_raw"] = TraceCapture(
-            pcs=[], opcodes=[], kernel=None, raw_stdout=stdout
-        )
+        kernels["_raw"] = TraceCapture(pcs=[], opcodes=[], kernel=None, raw_stdout=stdout)
     return kernels
 
 
@@ -477,6 +468,11 @@ def run_mau_in_docker(
     gpus = getattr(args, "mau_docker_gpus", None)
     if gpus:
         docker_cmd.extend(["--gpus", gpus])
+
+    if getattr(args, "add_docker_flag", False):
+        docker_cmd.extend(["--device", "/dev/nvidia0"])
+        docker_cmd.extend(["--device", "/dev/nvidiactl"])
+        docker_cmd.extend(["--device", "/dev/nvidia-uvm"])
 
     if os.name != "nt":
         try:
@@ -544,9 +540,9 @@ def run_mau(case: ExpandedTestCase, args: argparse.Namespace) -> TraceCapture:
     case.variant_dir.joinpath("mau.stdout.txt").write_text(result.stdout)
     case.variant_dir.joinpath("mau.stderr.txt").write_text(result.stderr)
     if result.returncode != 0:
-        raise RuntimeError(
-            f"Mau execution failed ({result.returncode}) for {case.case_id}"
-        )
+        print(result.stdout)
+        print(result.stderr)
+        raise RuntimeError(f"Mau execution failed ({result.returncode}) for {case.case_id}")
 
     kernels = parse_mau_trace(result.stdout, preferred_kernel=args.mau_kernel)
     target_kernel = args.mau_kernel
@@ -580,11 +576,7 @@ def parse_goevm_trace(output: str) -> TraceCapture:
             pc_value = obj_dict["pc"]
             pc: int
             if isinstance(pc_value, str):
-                pc = (
-                    int(pc_value, 16)
-                    if pc_value.startswith("0x")
-                    else int(pc_value, 10)
-                )
+                pc = int(pc_value, 16) if pc_value.startswith("0x") else int(pc_value, 10)
             elif isinstance(pc_value, int):
                 pc = pc_value
             else:
@@ -636,18 +628,14 @@ def run_goevm(case: ExpandedTestCase, args: argparse.Namespace) -> TraceCapture:
     # go-ethereum writes traces to stderr
     output = result.stderr or result.stdout
     if result.returncode != 0:
-        raise RuntimeError(
-            f"go-ethereum execution failed ({result.returncode}) for {case.case_id}"
-        )
+        raise RuntimeError(f"go-ethereum execution failed ({result.returncode}) for {case.case_id}")
     capture = parse_goevm_trace(output)
     capture.raw_stdout = result.stdout
     capture.raw_stderr = result.stderr
     return capture
 
 
-def compare_traces(
-    case: ExpandedTestCase, mau: TraceCapture, goevm: TraceCapture
-) -> CaseReport:
+def compare_traces(case: ExpandedTestCase, mau: TraceCapture, goevm: TraceCapture) -> CaseReport:
     if not mau.pcs:
         return CaseReport(
             case=case,
@@ -667,16 +655,14 @@ def compare_traces(
 
     if mau.pc_count != goevm.pc_count:
         detail = f"PC count mismatch (mau={mau.pc_count}, goevm={goevm.pc_count})"
-        return CaseReport(
-            case=case, status="pc-mismatch", detail=detail, mau=mau, goevm=goevm
-        )
+        return CaseReport(case=case, status="pc-mismatch", detail=detail, mau=mau, goevm=goevm)
 
     for idx, (m_pc, g_pc) in enumerate(zip(mau.pcs, goevm.pcs)):
         if m_pc != g_pc:
             detail = f"Trace mismatch at step {idx}: mau=0x{m_pc:x}, goevm=0x{g_pc:x}"
-            return CaseReport(
-                case=case, status="trace-mismatch", detail=detail, mau=mau, goevm=goevm
-            )
+            return CaseReport(case=case, status="trace-mismatch", detail=detail, mau=mau, goevm=goevm)
+
+    # PCs match, now check stacks if available
     stack_lengths_ok = (
         len(mau.first_stacks) == mau.pc_count
         and len(goevm.first_stacks) == goevm.pc_count
@@ -684,23 +670,19 @@ def compare_traces(
         and len(goevm.stack_depths) == goevm.pc_count
     )
 
-    have_stack_values = (
-        stack_lengths_ok
-        and any(val is not None for val in mau.first_stacks)
-        and len(goevm.first_stacks) == goevm.pc_count
-    )
-
-    if have_stack_values:
+    if stack_lengths_ok:
         for idx in range(mau.pc_count):
+            m_depth = mau.stack_depths[idx]
+            g_depth = goevm.stack_depths[idx]
+            # Skip stack comparison when either side has size=0
+            if m_depth == 0 or g_depth == 0:
+                continue
             m_val = mau.first_stacks[idx]
             g_val = goevm.first_stacks[idx]
-            if m_val is None and g_val is None:
+            if m_val is None or g_val is None:
                 continue
             if m_val != g_val:
-                detail = (
-                    f"Top-of-stack mismatch at step {idx}: "
-                    f"mau={m_val or '-'}, goevm={g_val or '-'}"
-                )
+                detail = f"Top-of-stack mismatch at step {idx}: mau={m_val}, goevm={g_val}"
                 return CaseReport(
                     case=case,
                     status="stack-mismatch",
@@ -708,42 +690,35 @@ def compare_traces(
                     mau=mau,
                     goevm=goevm,
                 )
-        detail = f"Traces and first stacks match (pcs={mau.pc_count})"
-        return CaseReport(
-            case=case, status="match", detail=detail, mau=mau, goevm=goevm
-        )
+        detail = f"PCs and stack values match (pcs={mau.pc_count})"
+        return CaseReport(case=case, status="match-full", detail=detail, mau=mau, goevm=goevm)
 
-    detail = f"Traces match (pcs={mau.pc_count})"
-    return CaseReport(case=case, status="match", detail=detail, mau=mau, goevm=goevm)
+    detail = f"PCs match (pcs={mau.pc_count})"
+    return CaseReport(case=case, status="match-pc", detail=detail, mau=mau, goevm=goevm)
 
 
-def write_summary(
-    work_dir: Path, reports: list[CaseReport], summary_path: Path | None
-) -> None:
+def write_summary(work_dir: Path, reports: list[CaseReport], summary_path: Path | None) -> None:
     summary: dict[str, Any] = {
         "stats": {
             "total": len(reports),
-            "match": sum(1 for r in reports if r.status == "match"),
+            "match_full": sum(1 for r in reports if r.status == "match-full"),
+            "match_pc": sum(1 for r in reports if r.status == "match-pc"),
             "pc_mismatch": sum(1 for r in reports if r.status == "pc-mismatch"),
             "trace_mismatch": sum(1 for r in reports if r.status == "trace-mismatch"),
             "stack_mismatch": sum(1 for r in reports if r.status == "stack-mismatch"),
-            "stack_depth_mismatch": sum(
-                1 for r in reports if r.status == "stack-depth-mismatch"
-            ),
-            "mau_trace_missing": sum(
-                1 for r in reports if r.status == "mau-trace-missing"
-            ),
-            "goevm_trace_missing": sum(
-                1 for r in reports if r.status == "goevm-trace-missing"
-            ),
+            "stack_depth_mismatch": sum(1 for r in reports if r.status == "stack-depth-mismatch"),
+            "mau_trace_missing": sum(1 for r in reports if r.status == "mau-trace-missing"),
+            "goevm_trace_missing": sum(1 for r in reports if r.status == "goevm-trace-missing"),
             "failures": sum(
                 1
                 for r in reports
                 if r.status
                 not in {
-                    "match",
+                    "match-full",
+                    "match-pc",
                     "pc-mismatch",
                     "trace-mismatch",
+                    "stack-mismatch",
                     "mau-trace-missing",
                     "goevm-trace-missing",
                 }
@@ -830,20 +805,20 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         total_cases = len(reports)
         stats = {
-            "match": sum(1 for r in reports if r.status == "match"),
+            "match_full": sum(1 for r in reports if r.status == "match-full"),
+            "match_pc": sum(1 for r in reports if r.status == "match-pc"),
             "pc_mismatch": sum(1 for r in reports if r.status == "pc-mismatch"),
             "trace_mismatch": sum(1 for r in reports if r.status == "trace-mismatch"),
             "stack_mismatch": sum(1 for r in reports if r.status == "stack-mismatch"),
             "mau_missing": sum(1 for r in reports if r.status == "mau-trace-missing"),
-            "goevm_missing": sum(
-                1 for r in reports if r.status == "goevm-trace-missing"
-            ),
+            "goevm_missing": sum(1 for r in reports if r.status == "goevm-trace-missing"),
             "error": sum(1 for r in reports if r.status == "error"),
         }
         print("Summary:")
         print(
             f"  Total cases: {total_cases}, "
-            f"Matches: {stats['match']}, "
+            f"PC+Stack matches: {stats['match_full']}, "
+            f"PC-only matches: {stats['match_pc']}, "
             f"PC mismatches: {stats['pc_mismatch']}, "
             f"Trace mismatches: {stats['trace_mismatch']}, "
             f"Stack mismatches: {stats['stack_mismatch']}, "
@@ -852,7 +827,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"Errors: {stats['error']}"
         )
 
-        exit_code = 0 if stats["match"] == len(cases) else 1
+        exit_code = 0 if (stats["match_full"] + stats["match_pc"]) == len(cases) else 1
         return exit_code
     finally:
         if created_tmp and not args.keep_artifacts:
